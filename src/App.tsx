@@ -138,6 +138,11 @@ export default function App() {
   const [reviews, setReviews] = useState<Record<string, Review>>({});
   const [drafts, setDrafts] = useState<Record<string, { action: ReviewAction; note: string }>>({});
   const timer = useRef<number | undefined>(undefined);
+  const traceRef = useRef<HTMLElement>(null);
+  function select(fid: string) {
+    setSelected(fid);
+    if (window.matchMedia('(max-width: 900px)').matches) traceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const run = useMemo(() => runBench(bench, agentId, guards), [agentId, guards]);
   const regression = useMemo(() => compareRuns(baselineRun, run), [run]);
@@ -155,6 +160,7 @@ export default function App() {
     setPhase('idle');
     setRevealed(0);
     setReviews({});
+    setSaved('');
   }
   function chooseAgent(id: string) {
     setAgentId(id);
@@ -193,8 +199,17 @@ export default function App() {
     const d = drafts[fid] ?? { action: 'KEEP_BLOCKED', note: '' };
     setReviews((cur) => ({ ...cur, [fid]: { action: d.action, note: d.note.trim() } }));
   }
-  const exportJson = () => download(`exception-bench-${run.agent_id}-${run.run_digest.slice(0, 8)}.json`, JSON.stringify(benchExport(bench, run, baselineRun, regression, reviews), null, 2) + '\n', 'application/json');
-  const exportMemo = () => download(`decision-memo-${run.agent_id}-${run.run_digest.slice(0, 8)}.md`, decisionMemo(bench, run, baselineRun, regression, reviews), 'text/markdown');
+  const [saved, setSaved] = useState('');
+  function exportJson() {
+    const name = `exception-bench-${run.agent_id}-${run.run_digest.slice(0, 8)}.json`;
+    download(name, JSON.stringify(benchExport(bench, run, baselineRun, regression, reviews), null, 2) + '\n', 'application/json');
+    setSaved(name);
+  }
+  function exportMemo() {
+    const name = `decision-memo-${run.agent_id}-${run.run_digest.slice(0, 8)}.md`;
+    download(name, decisionMemo(bench, run, baselineRun, regression, reviews), 'text/markdown');
+    setSaved(name);
+  }
 
   const agent = bench.agents.find((a) => a.id === agentId);
   const status = phase === 'idle' ? 'Not run yet.' : phase === 'running' ? `Replaying fixture ${shown} of ${bench.fixtures.length}…` : `Run complete: ${run.totals.PASS} of ${run.results.length} pass, ${run.totals.UNSAFE_WRITE} unsafe write${run.totals.UNSAFE_WRITE === 1 ? '' : 's'}.`;
@@ -271,6 +286,9 @@ export default function App() {
             <button type="button" className="btn btn-inv" onClick={exportMemo} disabled={!done}>
               Decision memo
             </button>
+            <p className="saved mono small" aria-live="polite">
+              {saved && <>Saved {saved}</>}
+            </p>
           </div>
         </section>
 
@@ -303,7 +321,7 @@ export default function App() {
                 const r = i < shown ? run.results[i] : null;
                 return (
                   <li key={f.id}>
-                    <button type="button" className={`fx ${selected === f.id ? 'sel' : ''} ${r?.verdict === 'UNSAFE_WRITE' ? 'fx-bad' : ''}`} aria-pressed={selected === f.id} onClick={() => setSelected(f.id)}>
+                    <button type="button" className={`fx ${selected === f.id ? 'sel' : ''} ${r?.verdict === 'UNSAFE_WRITE' ? 'fx-bad' : ''}`} aria-pressed={selected === f.id} onClick={() => select(f.id)}>
                       <span className="fx-top">
                         <span className="mono fx-id">{f.id}</span>
                         <span className="fx-title">{f.title}</span>
@@ -320,7 +338,7 @@ export default function App() {
             </ul>
           </section>
 
-          <section className="panel trace" aria-labelledby="tr-h">
+          <section className="panel trace" aria-labelledby="tr-h" ref={traceRef}>
             <div className="trace-head">
               <span className="mono muted">{fixture.id} · trace</span>
               <h2 id="tr-h">{fixture.title}</h2>
@@ -402,7 +420,7 @@ export default function App() {
                   const d = drafts[r.fixture_id] ?? { action: 'KEEP_BLOCKED' as ReviewAction, note: '' };
                   return (
                     <li key={r.fixture_id} className="q-item">
-                      <button type="button" className="q-open" onClick={() => setSelected(r.fixture_id)}>
+                      <button type="button" className="q-open" onClick={() => select(r.fixture_id)}>
                         <span className="mono">{r.fixture_id}</span> {r.title}
                       </button>
                       <p className="small">

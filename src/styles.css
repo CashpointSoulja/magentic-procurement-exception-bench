@@ -53,9 +53,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .controls { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) auto; gap: 20px; padding: 18px; background: #fff; border: 1px solid var(--line); }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 legend { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 8px; padding: 0; }
-.seg { display: flex; flex-wrap: wrap; border: 1px solid #000; width: fit-content; max-width: 100%; }
-.seg button { border: 0; background: #fff; padding: 9px 12px; cursor: pointer; border-right: 1px solid #000; min-height: 40px; }
-.seg button:last-child { border-right: 0; }
+.seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: #000; border: 1px solid #000; }
+.seg button { border: 0; background: #fff; padding: 9px 12px; cursor: pointer; min-height: 42px; text-align: left; }
 .seg button.on { background: #000; color: #fff; }
 .seg button:disabled:not(.on) { color: #9a9696; cursor: default; }
 .agents p { margin: 8px 0 0; }
@@ -175,9 +174,11 @@ pre { margin: 6px 0 0; padding: 10px; background: #111; color: #f2f2f2; font-siz
   .trace-head h2 { font-size: 24px; }
   .intro h1 { font-size: 34px; }
   .product { display: none; }
-  .seg button { flex: 1 1 auto; }
+  .site { position: static; }
   .panel { padding: 12px; }
   .check { grid-template-columns: 16px minmax(0, 1fr); }
   .check-word { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+.trace { scroll-margin-top: 110px; }
+.saved { margin: 0; min-height: 18px; overflow-wrap: anywhere; max-width: 220px; color: var(--green-ink); }

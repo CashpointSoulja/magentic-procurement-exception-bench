@@ -55,3 +55,24 @@ describe('bench UI flow', () => {
     expect(screen.getByText(/8 of 8 pass/)).toBeInTheDocument();
   });
 });
+
+describe('exports', () => {
+  it('downloads JSON and memo with the run digest in the file name', () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      created.push(this.download);
+    });
+    render(<App />);
+    runToEnd();
+    fireEvent.click(screen.getByRole('button', { name: /export json/i }));
+    fireEvent.click(screen.getByRole('button', { name: /decision memo/i }));
+    expect(created[0]).toMatch(/^exception-bench-v2\.4-baseline-[0-9a-f]{8}\.json$/);
+    expect(created[1]).toMatch(/^decision-memo-v2\.4-baseline-[0-9a-f]{8}\.md$/);
+    expect(screen.getByText(/^Saved decision-memo/)).toBeInTheDocument();
+    click.mockRestore();
+    vi.useRealTimers();
+  });
+});
