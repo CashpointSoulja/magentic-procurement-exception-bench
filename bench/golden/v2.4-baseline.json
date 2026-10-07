@@ -112,6 +112,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "HB-M8-30-A2"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "pass",
@@ -384,6 +390,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "NN-M10-ZN"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "fail",
@@ -599,6 +611,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "BRG-6204-2RS"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "pass",
@@ -807,6 +825,12 @@
         {
           "name": "compare",
           "checks": [
+            {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "CG-M20-IP68"
+            },
             {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
@@ -1017,6 +1041,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "PF-8MM"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "pass",
@@ -1222,6 +1252,12 @@
         {
           "name": "compare",
           "checks": [
+            {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "CF-20L"
+            },
             {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
@@ -1438,6 +1474,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "SD-1K5"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "pass",
@@ -1648,6 +1690,12 @@
           "name": "compare",
           "checks": [
             {
+              "rule": "CMP-00",
+              "label": "Quote SKU matches requisition",
+              "result": "pass",
+              "detail": "PF-6MM"
+            },
+            {
               "rule": "CMP-01",
               "label": "Quote unit reconciles to requisition UOM",
               "result": "pass",
@@ -1823,5 +1871,5 @@
       ]
     }
   ],
-  "run_digest": "51dfede2583b304866573c391cfa33ff8c95c328bdd76bfc13a428a4259c6497"
+  "run_digest": "3f66e312106fe0587f8152c3d337e15abb43956c3c93c1dded1b8fd5b8dea109"
 }

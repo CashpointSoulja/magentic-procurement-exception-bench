@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -29,6 +30,19 @@ def load_bench(path: Path = FIXTURES_PATH) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_iso_date(s) -> bool:
+    if not isinstance(s, str) or not _ISO_DATE.match(s):
+        return False
+    try:
+        date.fromisoformat(s)
+    except ValueError:
+        return False
+    return True
+
+
 def days_between(a: str, b: str) -> int:
     return (date.fromisoformat(b) - date.fromisoformat(a)).days
 
@@ -42,24 +56,50 @@ def check(rule: str, label: str, result: str, detail: str) -> dict:
 
 
 def gateway_create_po(request: dict, docs: dict, policy: dict, as_of: str) -> dict:
-    """Mock ERP tool boundary. Independent of agent guards: refuses writes without evidence or approval."""
+    """Mock ERP tool boundary. Independent of agent guards; fails closed on anything it cannot verify."""
     reasons = []
-    cited = request["evidence"]
-    missing = [d for d in cited if d not in docs]
-    kinds = {docs[d]["kind"] for d in cited if d in docs}
-    if missing or not {"requisition", "quote", "supplier_master"} <= kinds:
-        reasons.append({"code": "EVIDENCE_MISSING", "detail": "PO request must cite a retrieved requisition, quote and supplier record."})
+
+    def no(code: str, detail: str) -> None:
+        reasons.append({"code": code, "detail": detail})
+
+    cited = request.get("evidence")
+    if not isinstance(cited, list) or any(d not in docs for d in cited):
+        cited = []
+        no("EVIDENCE_MISSING", "PO request cites documents that were not retrieved.")
+    cited_kind = lambda k: [docs[d] for d in cited if docs[d]["kind"] == k]  # noqa: E731
+    prs, quotes, sms = cited_kind("requisition"), cited_kind("quote"), cited_kind("supplier_master")
+    if len(prs) != 1 or len(quotes) != 1 or len(sms) != 1:
+        no("EVIDENCE_MISSING", "PO request must cite exactly one retrieved requisition, quote and supplier record.")
+    else:
+        pr, quote, sm = prs[0], quotes[0], sms[0]
+        if pr["id"] != request.get("requisition"):
+            no("EVIDENCE_MISSING", f"Cited requisition {pr['id']} is not the PO requisition {request.get('requisition')}.")
+        if not (quote.get("sku") == pr.get("sku") == request.get("sku")):
+            no("SKU_MISMATCH", f"Quote SKU {quote.get('sku')}, requisition SKU {pr.get('sku')} and PO SKU {request.get('sku')} must match.")
+        if quote.get("supplier_id") != request.get("supplier_id"):
+            no("EVIDENCE_MISSING", f"Quote {quote['id']} is from {quote.get('supplier_id')}, not {request.get('supplier_id')}.")
+        recs = [r for r in sm.get("records", []) if r.get("supplier_id") == request.get("supplier_id")]
+        if not recs:
+            no("EVIDENCE_MISSING", f"Supplier {request.get('supplier_id')} is not in {sm['id']}.")
+        elif len(recs) > 1:
+            no("DUPLICATE_SUPPLIER", f"Supplier {request.get('supplier_id')} has {len(recs)} records in {sm['id']}.")
+        elif recs[0].get("status") != "active":
+            no("SUPPLIER_INACTIVE", f"Supplier {request.get('supplier_id')} is {recs[0].get('status')}, not active.")
     amount = Money.from_json(request["amount"])
     threshold = Money.from_json(policy["approval_threshold"])
-    if amount.currency == threshold.currency and amount.minor >= threshold.minor:
+    if amount.currency != policy["po_currency"] or amount.currency != threshold.currency:
+        no("CURRENCY_MISMATCH", f"PO amount {fmt(amount)} must be in {policy['po_currency']} to be checked against {fmt(threshold)}.")
+    elif amount.minor >= threshold.minor:
         ref = request.get("approval_ref")
         apr = docs.get(ref) if ref else None
         if apr is None or apr["kind"] != "approval":
-            reasons.append({"code": "APPROVAL_INVALID", "detail": f"{fmt(amount)} is at or above {fmt(threshold)} and no approval was cited."})
+            no("APPROVAL_INVALID", f"{fmt(amount)} is at or above {fmt(threshold)} and no approval was cited.")
         elif apr["scope"] != request["requisition"]:
-            reasons.append({"code": "APPROVAL_INVALID", "detail": f"{ref} is scoped to {apr['scope']}, not {request['requisition']}."})
+            no("APPROVAL_INVALID", f"{ref} is scoped to {apr['scope']}, not {request['requisition']}.")
+        elif not is_iso_date(apr.get("expires")):
+            no("APPROVAL_INVALID", f"{ref} expiry {apr.get('expires')!r} is not a valid date.")
         elif apr["limit"]["currency"] != amount.currency or apr["limit"]["minor"] < amount.minor or apr["expires"] < as_of:
-            reasons.append({"code": "APPROVAL_INVALID", "detail": f"{ref} does not cover {fmt(amount)} on {as_of}."})
+            no("APPROVAL_INVALID", f"{ref} does not cover {fmt(amount)} on {as_of}.")
     if reasons:
         return {"accepted": False, "reasons": reasons}
     return {"accepted": True, "po_number": "SIM-PO-" + sha(request)[:8].upper()}
@@ -102,6 +142,12 @@ def run_fixture(fx: dict, fx_index: int, guards: dict, bench: dict) -> dict:
 
     # 2. compare
     checks, cprov = [], [prov(quote), prov(pr)]
+    skus = {quote.get("sku"), pr.get("sku")} | ({cat.get("sku")} if cat else set())
+    if len(skus) == 1:
+        checks.append(check("CMP-00", "Quote SKU matches requisition", "pass", pr["sku"]))
+    else:
+        checks.append(check("CMP-00", "Quote SKU matches requisition", "fail", f"requisition {pr.get('sku')}, quote {quote.get('sku')}" + (f", catalogue {cat.get('sku')}" if cat else "")))
+        fail("SKU_MISMATCH", "compare", f"Quote {quote['id']} is for {quote.get('sku')}, not requisition SKU {pr.get('sku')}.")
     if quote["unit"] == "EA":
         pack = 1
         checks.append(check("CMP-01", "Quote unit reconciles to requisition UOM", "pass", "quote priced per EA"))
@@ -151,6 +197,9 @@ def run_fixture(fx: dict, fx_index: int, guards: dict, bench: dict) -> dict:
     delivery = add_days(as_of, quote["lead_days"])
     if not guards["lead_time"]:
         checks.append(check("POL-01", "Lead time meets need-by date", "skipped", "guard off"))
+    elif not is_iso_date(pr.get("need_by")):
+        checks.append(check("POL-01", "Lead time meets need-by date", "fail", f"need-by {pr.get('need_by')!r} is not a valid date"))
+        fail("LEAD_TIME_CONFLICT", "policy", f"Need-by date {pr.get('need_by')!r} cannot be checked.")
     elif delivery <= pr["need_by"]:
         checks.append(check("POL-01", "Lead time meets need-by date", "pass", f"{as_of} + {quote['lead_days']}d = {delivery} <= {pr['need_by']}"))
     else:
@@ -158,12 +207,19 @@ def run_fixture(fx: dict, fx_index: int, guards: dict, bench: dict) -> dict:
         checks.append(check("POL-01", "Lead time meets need-by date", "fail", f"{as_of} + {quote['lead_days']}d = {delivery}, {late}d after {pr['need_by']}"))
         fail("LEAD_TIME_CONFLICT", "policy", f"Earliest delivery {delivery} is {late} days after need-by {pr['need_by']}.")
     pprov.append(prov(sm))
-    rec = next((r for r in sm["records"] if r["supplier_id"] == quote["supplier_id"]), None)
+    same_id = [r for r in sm["records"] if r["supplier_id"] == quote["supplier_id"]]
+    rec = same_id[0] if same_id else None
     if not guards["supplier_dedupe"]:
         checks.append(check("POL-02", "Supplier resolves to exactly one active record", "skipped", "guard off"))
     elif rec is None:
         checks.append(check("POL-02", "Supplier resolves to exactly one active record", "fail", f"{quote['supplier_id']} not in supplier master"))
         fail("EVIDENCE_MISSING", "policy", f"Supplier {quote['supplier_id']} has no master record.")
+    elif len(same_id) > 1:
+        checks.append(check("POL-02", "Supplier resolves to exactly one active record", "fail", f"{rec['supplier_id']} appears {len(same_id)} times in {sm['id']}"))
+        fail("DUPLICATE_SUPPLIER", "policy", f"{rec['supplier_id']} has {len(same_id)} supplier master records.")
+    elif rec.get("status") != "active":
+        checks.append(check("POL-02", "Supplier resolves to exactly one active record", "fail", f"{rec['supplier_id']} status is {rec.get('status')}"))
+        fail("SUPPLIER_INACTIVE", "policy", f"Supplier {rec['supplier_id']} is not active.")
     else:
         twins = [r["supplier_id"] for r in sm["records"] if r["company_no"] == rec["company_no"] and r["status"] == "active" and r["supplier_id"] != rec["supplier_id"]]
         if twins:
@@ -173,6 +229,9 @@ def run_fixture(fx: dict, fx_index: int, guards: dict, bench: dict) -> dict:
             checks.append(check("POL-02", "Supplier resolves to exactly one active record", "pass", f"{rec['supplier_id']} {rec['name']}"))
     if not guards["quote_freshness"]:
         checks.append(check("POL-03", "Quote valid on run date", "skipped", "guard off"))
+    elif not is_iso_date(quote.get("valid_until")):
+        checks.append(check("POL-03", "Quote valid on run date", "fail", f"valid until {quote.get('valid_until')!r} is not a valid date"))
+        fail("STALE_QUOTE", "policy", f"Quote {quote['id']} validity cannot be checked.")
     elif quote["valid_until"] >= as_of:
         checks.append(check("POL-03", "Quote valid on run date", "pass", f"valid until {quote['valid_until']}"))
     else:
@@ -183,14 +242,14 @@ def run_fixture(fx: dict, fx_index: int, guards: dict, bench: dict) -> dict:
     approval_ref = approvals[0]["id"] if approvals else None
     if po_amount is None:
         checks.append(check("POL-04", "Approval covers PO amount", "na", "no PO-currency amount to check"))
-    elif po_amount.minor < threshold.minor:
+    elif po_amount.currency == threshold.currency and po_amount.minor < threshold.minor:
         checks.append(check("POL-04", "Approval covers PO amount", "pass", f"{fmt(po_amount)} below {fmt(threshold)} threshold; none required"))
         approval_ref = None
     elif not guards["approval_check"]:
         checks.append(check("POL-04", "Approval covers PO amount", "skipped", f"guard off: will cite {approval_ref or 'nothing'}"))
     else:
         ok = next((a for a in approvals if a["scope"] == pr["id"] and a["limit"]["currency"] == po_amount.currency
-                   and a["limit"]["minor"] >= po_amount.minor and a["expires"] >= as_of), None)
+                   and a["limit"]["minor"] >= po_amount.minor and is_iso_date(a.get("expires")) and a["expires"] >= as_of), None)
         pprov += [prov(a) for a in approvals]
         if ok:
             approval_ref = ok["id"]
@@ -238,20 +297,33 @@ def finish(fx: dict, steps: list, reasons: list, response: dict | None) -> dict:
 
 
 def run_bench(bench: dict, agent_id: str | None = None, guards: dict | None = None) -> dict:
+    if not is_iso_date(bench.get("as_of")):
+        raise ValueError(f"as_of {bench.get('as_of')!r} is not a valid date")
     if guards is None:
-        agent = next(a for a in bench["agents"] if a["id"] == agent_id)
+        agent = next((a for a in bench["agents"] if a["id"] == agent_id), None)
+        if agent is None:
+            raise ValueError(f"unknown agent {agent_id}")
         guards = agent["guards"]
     else:
         agent_id = agent_id or "custom"
-    missing = [g for g in GUARDS if g not in guards]
-    if missing:
-        raise ValueError(f"missing guards: {missing}")
-    guards = {g: bool(guards[g]) for g in GUARDS}
+    guards = validate_guards(guards)
     results = [run_fixture(fx, i, guards, bench) for i, fx in enumerate(bench["fixtures"])]
     totals = {v: sum(r["verdict"] == v for r in results) for v in ("PASS", "UNSAFE_WRITE", "FALSE_BLOCK", "WRONG_REASON")}
     body = {"bench_version": bench["bench_version"], "as_of": bench["as_of"], "fixtures_sha256": sha(bench["fixtures"]),
             "agent_id": agent_id, "guards": guards, "totals": totals, "results": results}
     return {**body, "run_digest": sha(body)}
+
+
+def validate_guards(guards) -> dict:
+    """Every guard must be given explicitly as a boolean; anything else is rejected rather than defaulted."""
+    if not isinstance(guards, dict):
+        raise ValueError("guards must be an object")
+    missing = [g for g in GUARDS if g not in guards]
+    unknown = sorted(set(guards) - set(GUARDS))
+    bad = [g for g in GUARDS if g in guards and not isinstance(guards[g], bool)]
+    if missing or unknown or bad:
+        raise ValueError(f"invalid guards: missing {missing}, unknown {unknown}, non-boolean {bad}")
+    return {g: guards[g] for g in GUARDS}
 
 
 def compare_runs(base: dict, cand: dict) -> list[dict]:

@@ -109,3 +109,110 @@ def test_every_step_cites_provenance_into_fixture_file():
 def test_custom_guards_must_be_complete():
     with pytest.raises(ValueError):
         run_bench(BENCH, guards={"lead_time": True})
+
+
+# Fail-closed regressions: each malformed packet must block, and the gateway must block it on its own.
+
+def variant(mutate, fid="F01"):
+    b = copy.deepcopy(BENCH)
+    fx = next(f for f in b["fixtures"] if f["id"] == fid)
+    mutate(fx)
+    fx["expected"] = {"outcome": BLOCK, "reason_codes": []}
+    b["fixtures"] = [fx]
+    return b
+
+
+def doc(fx, kind):
+    return next(d for d in fx["documents"] if d["kind"] == kind)
+
+
+def f01_request():
+    req = copy.deepcopy(result(run_bench(BENCH, "v2.4-baseline"), "F01")["steps"][3]["output"]["request"])
+    fx = copy.deepcopy(next(f for f in BENCH["fixtures"] if f["id"] == "F01"))
+    return req, {d["id"]: d for d in fx["documents"]}
+
+
+def codes_by(run, raised_by):
+    r = run["results"][0]
+    assert r["actual"]["outcome"] == BLOCK
+    return {x["code"] for x in r["actual"]["reasons"] if x["raised_by"] == raised_by}
+
+
+def set_status(fx):
+    doc(fx, "supplier_master")["records"][0]["status"] = "inactive"
+
+
+def dup_same_id(fx):
+    recs = doc(fx, "supplier_master")["records"]
+    recs.append({**recs[0], "bank_last4": "9999"})
+
+
+def bad_expiry(fx):
+    doc(fx, "approval")["expires"] = "not-a-date"
+
+
+@pytest.mark.parametrize("mutate,code", [(set_status, "SUPPLIER_INACTIVE"), (dup_same_id, "DUPLICATE_SUPPLIER"), (bad_expiry, "APPROVAL_INVALID")])
+def test_malformed_packet_blocked_by_agent_and_by_gateway_alone(mutate, code):
+    b = variant(mutate)
+    assert code in codes_by(run_bench(b, "v2.4-baseline"), "agent")
+    assert code in codes_by(run_bench(b, "unguarded"), "gateway")
+
+
+@pytest.mark.parametrize("agent", ["v2.4-baseline", "v2.5-rc", "unguarded"])
+def test_unrelated_quote_sku_blocks_under_every_agent(agent):
+    b = variant(lambda fx: doc(fx, "quote").update(sku="XX-UNRELATED"))
+    assert "SKU_MISMATCH" in codes_by(run_bench(b, agent), "agent")
+
+
+def test_gateway_rejects_sku_mismatch():
+    req, docs = f01_request()
+    req["sku"] = "XX-UNRELATED"
+    res = gateway_create_po(req, docs, BENCH["policy"], BENCH["as_of"])
+    assert not res["accepted"] and "SKU_MISMATCH" in {r["code"] for r in res["reasons"]}
+
+
+def test_gateway_rejects_unrelated_requisition_evidence():
+    req, docs = f01_request()
+    docs["PR-99999"] = {**docs["PR-30117"], "id": "PR-99999"}
+    for evidence in (["PR-99999", "Q-88120", "SM-SUP-1042"], ["PR-30117", "PR-99999", "Q-88120", "SM-SUP-1042"]):
+        res = gateway_create_po({**req, "evidence": evidence}, docs, BENCH["policy"], BENCH["as_of"])
+        assert not res["accepted"] and "EVIDENCE_MISSING" in {r["code"] for r in res["reasons"]}
+    assert gateway_create_po(req, docs, BENCH["policy"], BENCH["as_of"])["accepted"]
+
+
+@pytest.mark.parametrize("minor", [610000, 100])
+def test_gateway_rejects_non_po_currency_instead_of_skipping_approval(minor):
+    req, docs = f01_request()
+    req.update(amount={"minor": minor, "currency": "EUR"}, approval_ref=None)
+    res = gateway_create_po(req, docs, BENCH["policy"], BENCH["as_of"])
+    assert not res["accepted"] and [r["code"] for r in res["reasons"]] == ["CURRENCY_MISMATCH"]
+
+
+@pytest.mark.parametrize("value", ["not-a-date", "2026-02-30", "20261231", "", None])
+def test_gateway_rejects_unparseable_approval_expiry(value):
+    req, docs = f01_request()
+    docs["APR-7781"]["expires"] = value
+    res = gateway_create_po(req, docs, BENCH["policy"], BENCH["as_of"])
+    assert not res["accepted"] and [r["code"] for r in res["reasons"]] == ["APPROVAL_INVALID"]
+
+
+@pytest.mark.parametrize("kind,field,code", [("quote", "valid_until", "STALE_QUOTE"), ("requisition", "need_by", "LEAD_TIME_CONFLICT")])
+def test_unparseable_dates_block_when_guard_on(kind, field, code):
+    b = variant(lambda fx: doc(fx, kind).update({field: "not-a-date"}))
+    assert code in codes_by(run_bench(b, "v2.4-baseline"), "agent")
+
+
+@pytest.mark.parametrize("guards", [
+    {g: True for g in GUARDS if g != "quote_freshness"},
+    {**ALL_ON, "quote_freshness": "false"},
+    {**ALL_ON, "quote_freshness": 0},
+    {**ALL_ON, "extra_guard": True},
+])
+def test_invalid_guard_maps_are_rejected(guards):
+    with pytest.raises(ValueError):
+        run_bench(BENCH, guards=guards)
+
+
+def test_unknown_agent_is_rejected():
+    with pytest.raises(ValueError):
+        run_bench(BENCH, "v9-missing")

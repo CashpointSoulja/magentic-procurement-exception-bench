@@ -22,6 +22,11 @@ import {
 export const WRITE = 'PO_WRITE_ALLOWED';
 export const BLOCK = 'BLOCKED_FOR_REVIEW';
 
+export const isIsoDate = (s: unknown): s is string => {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
 const toOrdinal = (iso: string) => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000);
 export const daysBetween = (a: string, b: string) => toOrdinal(b) - toOrdinal(a);
 export const addDays = (a: string, n: number) => new Date((toOrdinal(a) + n) * 86400000).toISOString().slice(0, 10);
@@ -35,32 +40,57 @@ interface Approval extends Doc {
   expires: string;
 }
 
-export function gatewayCreatePo(request: Record<string, unknown>, docs: Record<string, Doc>, policy: Bench['policy'], asOf: string): GatewayResponse {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function gatewayCreatePo(request: Record<string, any>, docs: Record<string, Doc>, policy: Bench['policy'], asOf: string): GatewayResponse {
   const reasons: { code: string; detail: string }[] = [];
-  const cited = request.evidence as string[];
-  const missing = cited.filter((d) => !(d in docs));
-  const kinds = new Set(cited.filter((d) => d in docs).map((d) => docs[d].kind));
-  if (missing.length || !['requisition', 'quote', 'supplier_master'].every((k) => kinds.has(k))) {
-    reasons.push({ code: 'EVIDENCE_MISSING', detail: 'PO request must cite a retrieved requisition, quote and supplier record.' });
+  const no = (code: string, detail: string) => reasons.push({ code, detail });
+  let cited: string[] = request.evidence;
+  if (!Array.isArray(cited) || cited.some((d) => !(d in docs))) {
+    cited = [];
+    no('EVIDENCE_MISSING', 'PO request cites documents that were not retrieved.');
+  }
+  const citedKind = (k: string): any[] => cited.map((d) => docs[d]).filter((d) => d.kind === k);
+  const prs = citedKind('requisition');
+  const quotes = citedKind('quote');
+  const sms = citedKind('supplier_master');
+  if (prs.length !== 1 || quotes.length !== 1 || sms.length !== 1) {
+    no('EVIDENCE_MISSING', 'PO request must cite exactly one retrieved requisition, quote and supplier record.');
+  } else {
+    const [pr, quote, sm] = [prs[0], quotes[0], sms[0]];
+    if (pr.id !== request.requisition) no('EVIDENCE_MISSING', `Cited requisition ${pr.id} is not the PO requisition ${request.requisition}.`);
+    if (!(quote.sku === pr.sku && pr.sku === request.sku)) {
+      no('SKU_MISMATCH', `Quote SKU ${quote.sku}, requisition SKU ${pr.sku} and PO SKU ${request.sku} must match.`);
+    }
+    if (quote.supplier_id !== request.supplier_id) no('EVIDENCE_MISSING', `Quote ${quote.id} is from ${quote.supplier_id}, not ${request.supplier_id}.`);
+    const recs = (sm.records ?? []).filter((r: any) => r.supplier_id === request.supplier_id);
+    if (!recs.length) no('EVIDENCE_MISSING', `Supplier ${request.supplier_id} is not in ${sm.id}.`);
+    else if (recs.length > 1) no('DUPLICATE_SUPPLIER', `Supplier ${request.supplier_id} has ${recs.length} records in ${sm.id}.`);
+    else if (recs[0].status !== 'active') no('SUPPLIER_INACTIVE', `Supplier ${request.supplier_id} is ${recs[0].status}, not active.`);
   }
   const amount = m(request.amount);
   const threshold = m(policy.approval_threshold);
-  if (amount.currency === threshold.currency && amount.minor >= threshold.minor) {
+  if (amount.currency !== policy.po_currency || amount.currency !== threshold.currency) {
+    no('CURRENCY_MISMATCH', `PO amount ${fmt(amount)} must be in ${policy.po_currency} to be checked against ${fmt(threshold)}.`);
+  } else if (amount.minor >= threshold.minor) {
     const ref = request.approval_ref as string | null;
     const apr = (ref ? docs[ref] : undefined) as Approval | undefined;
     if (!apr || apr.kind !== 'approval') {
-      reasons.push({ code: 'APPROVAL_INVALID', detail: `${fmt(amount)} is at or above ${fmt(threshold)} and no approval was cited.` });
+      no('APPROVAL_INVALID', `${fmt(amount)} is at or above ${fmt(threshold)} and no approval was cited.`);
     } else if (apr.scope !== request.requisition) {
-      reasons.push({ code: 'APPROVAL_INVALID', detail: `${ref} is scoped to ${apr.scope}, not ${request.requisition}.` });
+      no('APPROVAL_INVALID', `${ref} is scoped to ${apr.scope}, not ${request.requisition}.`);
+    } else if (!isIsoDate(apr.expires)) {
+      no('APPROVAL_INVALID', `${ref} expiry ${pyRepr(apr.expires)} is not a valid date.`);
     } else if (apr.limit.currency !== amount.currency || apr.limit.minor < amount.minor || apr.expires < asOf) {
-      reasons.push({ code: 'APPROVAL_INVALID', detail: `${ref} does not cover ${fmt(amount)} on ${asOf}.` });
+      no('APPROVAL_INVALID', `${ref} does not cover ${fmt(amount)} on ${asOf}.`);
     }
   }
   if (reasons.length) return { accepted: false, reasons };
   return { accepted: true, po_number: 'SIM-PO-' + sha(request).slice(0, 8).toUpperCase() };
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// Matches Python's repr() for the values shown in check details.
+const pyRepr = (v: unknown) => (typeof v === 'string' ? `'${v}'` : v === undefined || v === null ? 'None' : String(v));
+
 export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: Bench): FixtureResult {
   const asOf = bench.as_of;
   const policy = bench.policy;
@@ -105,6 +135,13 @@ export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: 
   // 2. compare
   checks = [];
   const cprov = [prov(quote), prov(pr)];
+  const skus = new Set([quote.sku, pr.sku, ...(cat ? [cat.sku] : [])]);
+  const L0 = 'Quote SKU matches requisition';
+  if (skus.size === 1) checks.push(check('CMP-00', L0, 'pass', pr.sku));
+  else {
+    checks.push(check('CMP-00', L0, 'fail', `requisition ${pr.sku}, quote ${quote.sku}` + (cat ? `, catalogue ${cat.sku}` : '')));
+    fail('SKU_MISMATCH', 'compare', `Quote ${quote.id} is for ${quote.sku}, not requisition SKU ${pr.sku}.`);
+  }
   const L1 = 'Quote unit reconciles to requisition UOM';
   let pack: number;
   if (quote.unit === 'EA') {
@@ -162,6 +199,10 @@ export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: 
   const delivery = addDays(asOf, quote.lead_days);
   const P1 = 'Lead time meets need-by date';
   if (!guards.lead_time) checks.push(check('POL-01', P1, 'skipped', 'guard off'));
+  else if (!isIsoDate(pr.need_by)) {
+    checks.push(check('POL-01', P1, 'fail', `need-by ${pyRepr(pr.need_by)} is not a valid date`));
+    fail('LEAD_TIME_CONFLICT', 'policy', `Need-by date ${pyRepr(pr.need_by)} cannot be checked.`);
+  }
   else if (delivery <= pr.need_by) checks.push(check('POL-01', P1, 'pass', `${asOf} + ${quote.lead_days}d = ${delivery} <= ${pr.need_by}`));
   else {
     const late = daysBetween(pr.need_by, delivery);
@@ -170,11 +211,18 @@ export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: 
   }
   pprov.push(prov(sm));
   const P2 = 'Supplier resolves to exactly one active record';
-  const rec = sm.records.find((r: any) => r.supplier_id === quote.supplier_id) ?? null;
+  const sameId = sm.records.filter((r: any) => r.supplier_id === quote.supplier_id);
+  const rec = sameId[0] ?? null;
   if (!guards.supplier_dedupe) checks.push(check('POL-02', P2, 'skipped', 'guard off'));
   else if (rec === null) {
     checks.push(check('POL-02', P2, 'fail', `${quote.supplier_id} not in supplier master`));
     fail('EVIDENCE_MISSING', 'policy', `Supplier ${quote.supplier_id} has no master record.`);
+  } else if (sameId.length > 1) {
+    checks.push(check('POL-02', P2, 'fail', `${rec.supplier_id} appears ${sameId.length} times in ${sm.id}`));
+    fail('DUPLICATE_SUPPLIER', 'policy', `${rec.supplier_id} has ${sameId.length} supplier master records.`);
+  } else if (rec.status !== 'active') {
+    checks.push(check('POL-02', P2, 'fail', `${rec.supplier_id} status is ${rec.status ?? 'None'}`));
+    fail('SUPPLIER_INACTIVE', 'policy', `Supplier ${rec.supplier_id} is not active.`);
   } else {
     const twins = sm.records
       .filter((r: any) => r.company_no === rec.company_no && r.status === 'active' && r.supplier_id !== rec.supplier_id)
@@ -187,6 +235,10 @@ export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: 
   }
   const P3 = 'Quote valid on run date';
   if (!guards.quote_freshness) checks.push(check('POL-03', P3, 'skipped', 'guard off'));
+  else if (!isIsoDate(quote.valid_until)) {
+    checks.push(check('POL-03', P3, 'fail', `valid until ${pyRepr(quote.valid_until)} is not a valid date`));
+    fail('STALE_QUOTE', 'policy', `Quote ${quote.id} validity cannot be checked.`);
+  }
   else if (quote.valid_until >= asOf) checks.push(check('POL-03', P3, 'pass', `valid until ${quote.valid_until}`));
   else {
     const age = daysBetween(quote.valid_until, asOf);
@@ -197,13 +249,13 @@ export function runFixture(fx: Fixture, fxIndex: number, guards: Guards, bench: 
   const threshold = m(policy.approval_threshold);
   let approvalRef: string | null = approvals.length ? approvals[0].id : null;
   if (poAmount === null) checks.push(check('POL-04', P4, 'na', 'no PO-currency amount to check'));
-  else if (poAmount.minor < threshold.minor) {
+  else if (poAmount.currency === threshold.currency && poAmount.minor < threshold.minor) {
     checks.push(check('POL-04', P4, 'pass', `${fmt(poAmount)} below ${fmt(threshold)} threshold; none required`));
     approvalRef = null;
   } else if (!guards.approval_check) checks.push(check('POL-04', P4, 'skipped', `guard off: will cite ${approvalRef ?? 'nothing'}`));
   else {
     const amt = poAmount;
-    const ok = approvals.find((a) => a.scope === pr.id && a.limit.currency === amt.currency && a.limit.minor >= amt.minor && a.expires >= asOf);
+    const ok = approvals.find((a) => a.scope === pr.id && a.limit.currency === amt.currency && a.limit.minor >= amt.minor && isIsoDate(a.expires) && a.expires >= asOf);
     pprov.push(...approvals.map(prov));
     if (ok) {
       approvalRef = ok.id;
@@ -265,9 +317,10 @@ function finish(fx: Fixture, steps: Step[], reasons: Reason[], response: Gateway
 }
 
 export function runBench(bench: Bench, agentId: string, guardsIn?: Guards): Run {
+  if (!isIsoDate(bench.as_of)) throw new Error(`as_of ${bench.as_of} is not a valid date`);
   const g = guardsIn ?? bench.agents.find((a) => a.id === agentId)?.guards;
   if (!g) throw new Error(`unknown agent ${agentId}`);
-  const guards = Object.fromEntries(GUARDS.map((k) => [k, Boolean(g[k])])) as Guards;
+  const guards = validateGuards(g);
   const results = bench.fixtures.map((fx, i) => runFixture(fx, i, guards, bench));
   const totals = { PASS: 0, UNSAFE_WRITE: 0, FALSE_BLOCK: 0, WRONG_REASON: 0 };
   for (const r of results) totals[r.verdict] += 1;
@@ -275,6 +328,19 @@ export function runBench(bench: Bench, agentId: string, guardsIn?: Guards): Run 
   // round-trip so key order and nulls match the JSON the Python module writes
   const plain = JSON.parse(canonical(body)) as Omit<Run, 'run_digest'>;
   return { ...plain, run_digest: sha(plain) };
+}
+
+// Every guard must be given explicitly as a boolean; anything else is rejected rather than defaulted.
+export function validateGuards(g: unknown): Guards {
+  if (typeof g !== 'object' || g === null || Array.isArray(g)) throw new Error('guards must be an object');
+  const o = g as Record<string, unknown>;
+  const missing = GUARDS.filter((k) => !(k in o));
+  const unknown = Object.keys(o).filter((k) => !(GUARDS as readonly string[]).includes(k));
+  const bad = GUARDS.filter((k) => k in o && typeof o[k] !== 'boolean');
+  if (missing.length || unknown.length || bad.length) {
+    throw new Error(`invalid guards: missing [${missing}], unknown [${unknown}], non-boolean [${bad}]`);
+  }
+  return Object.fromEntries(GUARDS.map((k) => [k, o[k]])) as Guards;
 }
 
 export type Change = 'UNCHANGED' | 'REGRESSED' | 'IMPROVED';

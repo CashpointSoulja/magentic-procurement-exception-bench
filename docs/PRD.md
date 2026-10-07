@@ -27,7 +27,8 @@ Real ERP or supplier integration, model calls, sourcing optimisation, supplier s
 | FR1 | Load fixtures, policy and agent presets from one JSON file | `bench/fixtures.json` |
 | FR2 | Four-step trace: retrieve, compare, policy, proposed ERP action | `bench/engine.py`, `src/engine/engine.ts` |
 | FR3 | Block when evidence is missing (requisition, quote, supplier record, FX, catalogue) | RET-01, CMP-01, CMP-02, gateway |
-| FR4 | Block when approval is absent, mis-scoped, too small or expired | POL-04, gateway |
+| FR4 | Block when approval is absent, mis-scoped, too small, expired or has an unparseable expiry, or when the amount is not in the PO currency | POL-04, gateway |
+| FR4a | Block an unrelated quote SKU, an inactive supplier, or several records under one supplier ID | CMP-00, POL-02, gateway |
 | FR5 | Six toggleable agent guards. The gateway is not toggleable | UI controls |
 | FR6 | Expected vs actual, verdict per fixture | UI trace header, export |
 | FR7 | Regression vs baseline digest | UI table, CLI output |
