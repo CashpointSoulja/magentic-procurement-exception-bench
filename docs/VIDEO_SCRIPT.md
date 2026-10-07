@@ -1,6 +1,6 @@
 # Walkthrough script
 
-Video: `public/walkthrough/walkthrough.mp4` (87.3 s, 1366×768, voiced, captions burned in plus `walkthrough.vtt`). Recorded from the production build of this repo. Independent concept by Ayo Ahmed. Not affiliated with Magentic.
+Video: `public/walkthrough/walkthrough.mp4` (87.2 s, 1366×768, voiced, captions burned in plus `walkthrough.vtt`). Recorded from the production build of this repo. Independent concept by Ayo Ahmed. Not affiliated with Magentic.
 
 | # | On screen | Narration |
 |---|---|---|
