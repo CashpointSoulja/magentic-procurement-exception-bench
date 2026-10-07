@@ -3,7 +3,7 @@
 Independent concept by Ayo Ahmed. Not affiliated with Magentic. Based only on public sources checked 2026-10-07 ([Sources](SOURCES.md)).
 
 ## The role, as posted
-Magentic's public post for **AI Product Engineer** (London, hybrid, £90,000–£110,000) describes building agentic workflows and multi-agent collaboration, LLM-based features, **benchmarking agent performance, safety and behaviour**, tooling into **ERP and customer systems**, production engineering in **Python**, and explaining technical decisions to technical and non-technical people.
+Magentic's public post for **AI Product Engineer** (London, hybrid, £90,000–£110,000) describes building agentic workflows and multi-agent collaboration, language-model features, **benchmarking agent performance, safety and behaviour**, tooling into **ERP and customer systems**, production engineering in **Python**, and explaining technical decisions to technical and non-technical people.
 
 ## The company, as published
 magentic.com describes "digital workers for the physical world" that take on procurement and supply-chain work for manufacturers. It talks about value hunting, protection and recovery: checking requisitions against contracts and prior purchases and applying compliance controls before a PO issues. The security page describes human review points with clear evidence traces and deterministic, controlled interactions with systems of record.
