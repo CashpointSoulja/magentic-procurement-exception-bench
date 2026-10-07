@@ -1,0 +1,8 @@
+[project]
+name = "procurement-exception-bench"
+version = "1.0.0"
+requires-python = ">=3.10"
+description = "Deterministic synthetic benchmark for procurement-agent exceptions and ERP write boundaries."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
