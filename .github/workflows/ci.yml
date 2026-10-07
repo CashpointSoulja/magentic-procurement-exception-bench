@@ -1,8 +1,14 @@
-name: Test and deploy to GitHub Pages
+name: Test and build
 on:
   push:
-    branches: [main]
+    branches: [main, build/exception-bench]
+  pull_request:
   workflow_dispatch:
+    inputs:
+      deploy_pages:
+        description: Also publish dist to GitHub Pages
+        type: boolean
+        default: false
 permissions:
   contents: read
   pages: write
@@ -30,6 +36,7 @@ jobs:
         with:
           path: dist
   deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_pages
     needs: build
     runs-on: ubuntu-latest
     environment:

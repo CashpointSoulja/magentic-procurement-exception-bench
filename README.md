@@ -61,6 +61,19 @@ npm test
 npm run build && npm run preview
 ```
 
+## Deploy (Cloudflare Pages, free plan)
+
+Static site, no server code, no secrets. In Cloudflare Pages connect this repo with:
+
+| Setting | Value |
+|---|---|
+| Production branch | `main` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Environment variable | `NODE_VERSION=22` |
+
+The app uses relative asset paths, so it works at the site root or a sub-path. The walkthrough is served at `/walkthrough/`. GitHub Actions runs the Python and TypeScript tests and the build on every push. GitHub Pages publishing is optional and manual (`workflow_dispatch` with `deploy_pages`).
+
 ## Docs
 
 [Design and brand](docs/DESIGN.md) · [Brand guide](docs/brand/brand-guide.html) · [PRD](docs/PRD.md) · [JTBD](docs/JTBD.md) · [Five whys](docs/FIVE_WHYS.md) · [Metrics](docs/METRICS.md) · [Assumptions and risks](docs/ASSUMPTIONS_RISKS.md) · [Viability memo](docs/VIABILITY_MEMO.md) · [Test plan](docs/TEST_PLAN.md) · [Test results](docs/TEST_RESULTS.md) · [V2 roadmap](docs/ROADMAP_V2.md) · [Sources](docs/SOURCES.md) · [Walkthrough script](docs/VIDEO_SCRIPT.md)
