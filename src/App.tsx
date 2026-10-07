@@ -470,7 +470,7 @@ export default function App() {
         <div className="wrap foot-inner">
           <p>Independent concept by Ayo Ahmed. Not affiliated with Magentic. Magentic name and logo belong to their owner and are used only to show the brand mirror.</p>
           <p className="mono small">
-            bench {bench.bench_version} · run date {bench.as_of} · fixtures sha {baselineRun.fixtures_sha256.slice(0, 12)} · all data synthetic
+            bench {bench.bench_version} · run date {bench.as_of} · fixtures sha {baselineRun.fixtures_sha256.slice(0, 12)} · all data synthetic · <a href="./walkthrough/">walkthrough video</a>
           </p>
         </div>
       </footer>

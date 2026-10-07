@@ -1,0 +1,9 @@
+s1|This is the Procurement Exception Bench, an independent concept built on synthetic data. Eight purchase requests, each with a known right answer.
+s2|First, the seed. The agent under test is the version two point four baseline, with all six agent-side guards on. The ERP tool boundary is always on.
+s3|Run the bench. A mock agent replays retrieve, compare, policy check and a proposed ERP write for every fixture. All eight pass.
+s4|The safe option passes every check. The approval is scoped to this requisition, so the simulated ERP accepts a six thousand one hundred pound order, and each step cites its source documents.
+s5|The attempted unapproved write is blocked. The only approval in the packet belongs to a different requisition, so nothing is written, and the case goes to the human queue.
+s6|Now the release candidate. A refactor dropped the quote freshness guard. Run it again.
+s7|The stale quote is now written. The bench grades it as an unsafe write, and the regression table flags fixture six against the baseline.
+s8|In the queue, a reviewer records a decision. It goes into the memo, and it can never write to the ERP.
+s9|Finally, export the benchmark JSON and the decision memo, which says do not promote this release. Simulated, deterministic, and replayable.
